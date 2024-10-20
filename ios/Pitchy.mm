@@ -72,7 +72,7 @@ RCT_EXPORT_METHOD(start:(RCTPromiseResolveBlock)resolve
     NSError *error = nil;
     [audioEngine startAndReturnError:&error];
     if (error) {
-        reject(@"start_error", @"Failed to start audio engine", error);
+        reject(@"start_error", [NSString stringWithFormat:@"Failed to start audio engine: %@", error.localizedDescription], error);
     } else {
         isRecording = YES;
         resolve(@(YES));
