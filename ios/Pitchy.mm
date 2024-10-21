@@ -37,7 +37,7 @@ RCT_EXPORT_METHOD(init:(NSDictionary *)config) {
         NSError *error = nil;
         [session setCategory:AVAudioSessionCategoryPlayAndRecord
                         mode:AVAudioSessionModeMeasurement
-                     options:AVAudioSessionCategoryOptionDefaultToSpeaker
+                     options:AVAudioSessionCategoryOptionAllowBluetooth|AVAudioSessionCategoryOptionAllowBluetoothA2DP
                        error:&error];
         if (error) {
             RCTLogError(@"Error setting AVAudioSession category: %@", error);
