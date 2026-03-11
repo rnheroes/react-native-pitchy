@@ -1,23 +1,7 @@
-import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
+import { NativeEventEmitter } from 'react-native';
+import NativePitchy from './NativePitchy';
 
-const LINKING_ERROR =
-  `The package 'react-native-pitchy' doesn't seem to be linked. Make sure: \n\n` +
-  Platform.select({ ios: "- You have run 'pod install'\n", default: '' }) +
-  '- You rebuilt the app after installing the package\n' +
-  '- You are not using Expo Go\n';
-
-const PitchyNativeModule = NativeModules.Pitchy
-  ? NativeModules.Pitchy
-  : new Proxy(
-      {},
-      {
-        get() {
-          throw new Error(LINKING_ERROR);
-        },
-      }
-    );
-
-const eventEmitter = new NativeEventEmitter(PitchyNativeModule);
+const eventEmitter = new NativeEventEmitter(NativePitchy);
 
 export type PitchyAlgorithm = 'ACF2+';
 
@@ -43,21 +27,21 @@ export type PitchyEventCallback = ({ pitch }: { pitch: number }) => void;
 
 const Pitchy = {
   init(config?: PitchyConfig) {
-    return PitchyNativeModule.configure({
+    return NativePitchy.configure({
       bufferSize: 4096,
       minVolume: -60,
       algorithm: 'ACF2+',
       ...config,
     });
   },
-  start(): Promise<void> {
-    return PitchyNativeModule.start();
+  start(): Promise<boolean> {
+    return NativePitchy.start();
   },
-  stop(): Promise<void> {
-    return PitchyNativeModule.stop();
+  stop(): Promise<boolean> {
+    return NativePitchy.stop();
   },
   isRecording(): Promise<boolean> {
-    return PitchyNativeModule.isRecording();
+    return NativePitchy.isRecording();
   },
   addListener(callback: PitchyEventCallback) {
     return eventEmitter.addListener('onPitchDetected', callback);

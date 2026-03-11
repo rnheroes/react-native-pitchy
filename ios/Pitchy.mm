@@ -8,6 +8,7 @@
     double minVolume;
     BOOL isRecording;
     BOOL isInitialized;
+    BOOL hasListeners;
 }
 
 RCT_EXPORT_MODULE()
@@ -16,10 +17,25 @@ RCT_EXPORT_MODULE()
   return @[@"onPitchDetected"];
 }
 
+- (void)startObserving {
+    hasListeners = YES;
+}
+
+- (void)stopObserving {
+    hasListeners = NO;
+}
+
+RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
+    // Required for RCTEventEmitter
+}
+
+RCT_EXPORT_METHOD(removeListeners:(double)count) {
+    // Required for RCTEventEmitter
+}
+
 RCT_EXPORT_METHOD(configure:(NSDictionary *)config) {
     if (!isInitialized) {
         @try {
-            // Configure audio session BEFORE creating the engine
             AVAudioSession *session = [AVAudioSession sharedInstance];
             NSError *error = nil;
             [session setCategory:AVAudioSessionCategoryPlayAndRecord
@@ -105,7 +121,17 @@ RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
 
     double detectedPitch = pitchy::autoCorrelate(buf, sampleRate, minVolume);
 
-    [self sendEventWithName:@"onPitchDetected" body:@{@"pitch": @(detectedPitch)}];
+    if (hasListeners) {
+        [self sendEventWithName:@"onPitchDetected" body:@{@"pitch": @(detectedPitch)}];
+    }
 }
+
+#ifdef RCT_NEW_ARCH_ENABLED
+- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
+    (const facebook::react::ObjCTurboModule::InitParams &)params
+{
+    return std::make_shared<facebook::react::NativePitchySpecJSI>(params);
+}
+#endif
 
 @end

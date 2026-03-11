@@ -7,7 +7,7 @@
 #include <limits>
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_pitchy_PitchyModule_nativeAutoCorrelate(JNIEnv *env, jobject thiz, jshortArray buffer, jint sampleRate, jdouble minVolume)
+Java_com_pitchy_PitchyModuleImpl_nativeAutoCorrelate(JNIEnv *env, jobject thiz, jshortArray buffer, jint sampleRate, jdouble minVolume)
 {
     // pitchy::autoCorrelate(const std::vector<double> &buf, double sampleRate, double minVolume)
     // Convert jshortArray to std::vector<double>

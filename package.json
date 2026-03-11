@@ -1,6 +1,6 @@
 {
   "name": "react-native-pitchy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A simple pitch detection module for React Native",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
@@ -160,8 +160,16 @@
       ]
     ]
   },
+  "codegenConfig": {
+    "name": "RNPitchySpec",
+    "type": "modules",
+    "jsSrcsDir": "./src",
+    "android": {
+      "javaPackageName": "com.pitchy"
+    }
+  },
   "create-react-native-library": {
-    "type": "module-legacy",
+    "type": "module-mixed",
     "languages": "cpp",
     "version": "0.40.18"
   }

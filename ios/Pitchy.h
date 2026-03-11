@@ -3,7 +3,7 @@
 #endif
 
 #ifdef RCT_NEW_ARCH_ENABLED
-#import "RNPitchySpec.h"
+#import <RNPitchySpec/RNPitchySpec.h>
 #import <React/RCTEventEmitter.h>
 
 @interface Pitchy : RCTEventEmitter <NativePitchySpec>
