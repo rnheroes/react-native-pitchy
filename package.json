@@ -1,16 +1,15 @@
 {
   "name": "react-native-pitchy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A simple pitch detection module for React Native",
   "source": "./src/index.tsx",
-  "main": "./lib/commonjs/index.js",
-  "module": "./lib/module/index.js",
+  "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
     ".": {
+      "source": "./src/index.tsx",
       "types": "./lib/typescript/src/index.d.ts",
-      "import": "./lib/module/index.js",
-      "require": "./lib/commonjs/index.js"
+      "default": "./lib/module/index.js"
     }
   },
   "files": [
@@ -64,10 +63,10 @@
   "devDependencies": {
     "@commitlint/config-conventional": "^17.0.2",
     "@evilmartians/lefthook": "^1.5.0",
-    "@react-native/eslint-config": "^0.73.1",
+    "@react-native/eslint-config": "^0.84.1",
     "@release-it/conventional-changelog": "^5.0.0",
     "@types/jest": "^29.5.5",
-    "@types/react": "^18.2.44",
+    "@types/react": "^19.1.1",
     "commitlint": "^17.0.2",
     "del-cli": "^5.1.0",
     "eslint": "^8.51.0",
@@ -75,15 +74,15 @@
     "eslint-plugin-prettier": "^5.0.1",
     "jest": "^29.7.0",
     "prettier": "^3.0.3",
-    "react": "18.2.0",
-    "react-native": "0.74.3",
-    "react-native-builder-bob": "^0.28.0",
+    "react": "19.2.4",
+    "react-native": "0.84.1",
+    "react-native-builder-bob": "^0.40.18",
     "release-it": "^15.0.0",
     "turbo": "^1.10.7",
-    "typescript": "^5.2.2"
+    "typescript": "^5.9.3"
   },
   "resolutions": {
-    "@types/react": "^18.2.44"
+    "@types/react": "^19.1.1"
   },
   "peerDependencies": {
     "react": "*",
@@ -129,17 +128,7 @@
       "prettier"
     ],
     "rules": {
-      "react/react-in-jsx-scope": "off",
-      "prettier/prettier": [
-        "error",
-        {
-          "quoteProps": "consistent",
-          "singleQuote": true,
-          "tabWidth": 2,
-          "trailingComma": "es5",
-          "useTabs": false
-        }
-      ]
+      "react/react-in-jsx-scope": "off"
     }
   },
   "eslintIgnore": [
@@ -158,12 +147,6 @@
     "output": "lib",
     "targets": [
       [
-        "commonjs",
-        {
-          "esm": true
-        }
-      ],
-      [
         "module",
         {
           "esm": true
@@ -180,6 +163,6 @@
   "create-react-native-library": {
     "type": "module-legacy",
     "languages": "cpp",
-    "version": "0.39.0"
+    "version": "0.40.18"
   }
 }

@@ -34,7 +34,7 @@ class PitchyModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun init(config: ReadableMap) {
+  fun configure(config: ReadableMap) {
       minVolume = config.getDouble("minVolume")
       bufferSize = config.getInt("bufferSize")
 

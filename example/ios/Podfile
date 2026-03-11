@@ -6,7 +6,15 @@ require "#{ws_dir}/node_modules/react-native-test-app/test_app.rb"
 
 workspace 'PitchyExample.xcworkspace'
 
-use_test_app!
+use_test_app!({
+  post_install: proc do |installer|
+    # Add NSMicrophoneUsageDescription to generated Info.plist
+    info_plist_path = File.join(__dir__, '..', 'node_modules', '.generated', 'ios', 'Info.plist')
+    if File.exist?(info_plist_path)
+      system("/usr/libexec/PlistBuddy -c \"Add :NSMicrophoneUsageDescription string 'This app needs access to the microphone for pitch detection'\" \"#{info_plist_path}\" 2>/dev/null")
+    end
+  end
+})
 
 def node_require(script)
   # Resolve script with node to allow for hoisting

@@ -16,39 +16,42 @@ RCT_EXPORT_MODULE()
   return @[@"onPitchDetected"];
 }
 
-RCT_EXPORT_METHOD(init:(NSDictionary *)config) {
-    #if TARGET_IPHONE_SIMULATOR
-        RCTLogInfo(@"Pitchy module is not supported on the iOS simulator");
-        return;
-    #endif
+RCT_EXPORT_METHOD(configure:(NSDictionary *)config) {
     if (!isInitialized) {
-        audioEngine = [[AVAudioEngine alloc] init];
-        AVAudioInputNode *inputNode = [audioEngine inputNode];
-        
-        AVAudioFormat *format = [inputNode inputFormatForBus:0];
-        sampleRate = format.sampleRate;
-        minVolume = [config[@"minVolume"] doubleValue];
+        @try {
+            // Configure audio session BEFORE creating the engine
+            AVAudioSession *session = [AVAudioSession sharedInstance];
+            NSError *error = nil;
+            [session setCategory:AVAudioSessionCategoryPlayAndRecord
+                            mode:AVAudioSessionModeMeasurement
+                         options:AVAudioSessionCategoryOptionDefaultToSpeaker
+                           error:&error];
+            if (error) {
+                RCTLogError(@"Error setting AVAudioSession category: %@", error);
+                return;
+            }
 
-        [inputNode installTapOnBus:0 bufferSize:[config[@"bufferSize"] unsignedIntValue] format:format block:^(AVAudioPCMBuffer * _Nonnull buffer, AVAudioTime * _Nonnull when) {
-            [self detectPitch:buffer];
-        }];
+            [session setActive:YES error:&error];
+            if (error) {
+                RCTLogError(@"Error activating AVAudioSession: %@", error);
+                return;
+            }
 
-        AVAudioSession *session = [AVAudioSession sharedInstance];
-        NSError *error = nil;
-        [session setCategory:AVAudioSessionCategoryPlayAndRecord
-                        mode:AVAudioSessionModeMeasurement
-                     options:AVAudioSessionCategoryOptionDefaultToSpeaker
-                       error:&error];
-        if (error) {
-            RCTLogError(@"Error setting AVAudioSession category: %@", error);
+            audioEngine = [[AVAudioEngine alloc] init];
+            AVAudioInputNode *inputNode = [audioEngine inputNode];
+
+            AVAudioFormat *format = [inputNode inputFormatForBus:0];
+            sampleRate = format.sampleRate;
+            minVolume = [config[@"minVolume"] doubleValue];
+
+            [inputNode installTapOnBus:0 bufferSize:[config[@"bufferSize"] unsignedIntValue] format:format block:^(AVAudioPCMBuffer * _Nonnull buffer, AVAudioTime * _Nonnull when) {
+                [self detectPitch:buffer];
+            }];
+
+            isInitialized = YES;
+        } @catch (NSException *exception) {
+            RCTLogError(@"Pitchy configure error: %@ - %@", exception.name, exception.reason);
         }
-        
-        [session setActive:YES error:&error];
-        if (error) {
-            RCTLogError(@"Error activating AVAudioSession: %@", error);
-        }
-
-        isInitialized = YES;
     }
 }
 
@@ -69,19 +72,23 @@ RCT_EXPORT_METHOD(start:(RCTPromiseResolveBlock)resolve
         return;
     }
 
-    NSError *error = nil;
-    [audioEngine startAndReturnError:&error];
-    if (error) {
-        reject(@"start_error", @"Failed to start audio engine", error);
-    } else {
-        isRecording = YES;
-        resolve(@(YES));
+    @try {
+        NSError *error = nil;
+        [audioEngine startAndReturnError:&error];
+        if (error) {
+            reject(@"start_error", @"Failed to start audio engine", error);
+        } else {
+            isRecording = YES;
+            resolve(@(YES));
+        }
+    } @catch (NSException *exception) {
+        reject(@"start_error", [NSString stringWithFormat:@"Failed to start: %@", exception.reason], nil);
     }
 }
 
 RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject) {
-                    
+
     if (!isRecording) {
         reject(@"not_recording", @"Not recording", nil);
         return;
@@ -97,7 +104,7 @@ RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
     std::vector<double> buf(channelData, channelData + buffer.frameLength);
 
     double detectedPitch = pitchy::autoCorrelate(buf, sampleRate, minVolume);
-    
+
     [self sendEventWithName:@"onPitchDetected" body:@{@"pitch": @(detectedPitch)}];
 }
 

@@ -43,7 +43,7 @@ export type PitchyEventCallback = ({ pitch }: { pitch: number }) => void;
 
 const Pitchy = {
   init(config?: PitchyConfig) {
-    return PitchyNativeModule.init({
+    return PitchyNativeModule.configure({
       bufferSize: 4096,
       minVolume: -60,
       algorithm: 'ACF2+',

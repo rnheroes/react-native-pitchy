@@ -14,7 +14,7 @@
 /**
  * Initialize the audio engine with the provided configuration.
  */
-- (void)init:(NSDictionary *)config;
+- (void)configure:(NSDictionary *)config;
 
 /**
  * Start pitch detection.
