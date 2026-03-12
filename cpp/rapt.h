@@ -20,14 +20,14 @@ namespace pitchy {
    * @param sampleRate Sample rate in Hz
    * @param minVolume  Minimum volume threshold in dB
    * @param minFreq    Minimum candidate frequency (default 50 Hz)
-   * @param maxFreq    Maximum candidate frequency (default 500 Hz, speech-optimized)
+   * @param maxFreq    Maximum candidate frequency (default 4000 Hz)
    * @return PitchDetectionResult with pitch and confidence
    */
   PitchDetectionResult raptDetect(const std::vector<double> &buf,
                                    double sampleRate,
                                    double minVolume,
                                    double minFreq = 50.0,
-                                   double maxFreq = 500.0);
+                                   double maxFreq = 4000.0);
 }
 
 #endif /* PITCHY_RAPT_H */

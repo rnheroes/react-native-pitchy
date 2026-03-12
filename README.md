@@ -60,12 +60,12 @@ subscription.remove();
 
 | Algorithm | Type | Best For | Latency | Accuracy |
 |-----------|------|----------|---------|----------|
-| `ACF2+` | Classical | General purpose | ~4.0ms | Good |
-| `YIN` | Classical (FFT) | Guitar tuning | ~1.3ms | Sub-cent on clean signals |
-| `MPM` | Classical (NSDF) | Instrument tuning | ~1.2ms | Sub-cent (±0.02 cents) |
-| `HPS` | Frequency domain | Harmonic-rich signals | ~0.3ms | Good on strings/brass |
-| `AMDF` | Time domain | Low-power devices | ~1.6ms | ±2 cents on clean signals |
-| `RAPT` | Two-stage NCCF | Speech processing | ~2.0ms | Very robust for speech |
+| `YIN` | Classical (FFT) | Guitar tuning | ~1.3ms | 86.0% RPA |
+| `RAPT` | Two-stage NCCF | Speech processing | ~2.5ms | 83.7% RPA |
+| `ACF2+` | Classical | General purpose | ~4.2ms | 81.4% RPA |
+| `MPM` | Classical (NSDF) | Instrument tuning | ~1.4ms | 79.1% RPA |
+| `AMDF` | Time domain | Low-power devices | ~1.7ms | 74.4% RPA |
+| `HPS` | Frequency domain | Harmonic-rich signals | ~0.3ms | 55.8% RPA |
 
 ### YIN
 FFT-accelerated autocorrelation with cumulative mean normalized difference. Best for instrument tuning where low latency and high precision on clean signals matter.
@@ -86,29 +86,48 @@ Two-stage pitch detection: first a coarse search on 4x downsampled signal for fa
 
 Measured on Apple Silicon, 4096 samples @ 44.1kHz, 1000 iterations:
 
-| Algorithm | ms/call | FPS | Notes |
-|-----------|---------|-----|-------|
-| HPS | 0.31 | 3228 | Fastest — frequency domain |
-| MPM | 1.24 | 806 | FFT-based NSDF |
-| YIN | 1.26 | 793 | FFT-accelerated CMND |
-| AMDF | 1.60 | 625 | Time-domain, no FFT |
-| RAPT | 2.00 | 500 | Two-stage NCCF |
-| ACF2+ | 4.04 | 248 | Legacy time-domain |
+| Algorithm | ms/call | FPS | Clean RPA | Noisy RPA | Notes |
+|-----------|---------|-----|-----------|-----------|-------|
+| HPS | 0.31 | 3198 | 100%* | 42.1% | Fastest — frequency domain |
+| YIN | 1.34 | 744 | 100% | 100% | FFT-accelerated CMND |
+| MPM | 1.35 | 743 | 100% | 100% | FFT-based NSDF |
+| AMDF | 1.69 | 591 | 100% | 100% | Time-domain, no FFT |
+| RAPT | 2.48 | 403 | 100% | 100% | Two-stage NCCF |
+| ACF2+ | 4.24 | 236 | 100% | 89.5% | Legacy time-domain |
+
+\* HPS requires harmonic-rich signals (100% on instrument-like signals, 0% on pure sine).
 
 All algorithms run well within real-time requirements (a 4096-sample buffer at 44.1kHz represents ~93ms of audio).
+
+### Real-World Audio Accuracy
+
+Tested on 43 real recordings: 32 orchestral instruments from [Philharmonia Orchestra](https://philharmonia.co.uk/resources/sound-samples/) (CC BY-SA 3.0) + 11 male singing voice from [Human Voice Dataset](https://github.com/vocobox/human-voice-dataset) (MIT):
+
+| Algorithm | Cello | Guitar | Flute | Clarinet | Fr. Horn | Voice | Overall RPA |
+|-----------|-------|--------|-------|----------|----------|-------|-------------|
+| YIN       | 100%  | 100%   | 100%  | 100%     | 100%     | 73%   | 86.0%       |
+| RAPT      | 100%  | 100%   | 100%  | 100%     | 100%     | 73%   | 83.7%       |
+| ACF2+     | 100%  | 83%    | 100%  | 100%     | 100%     | 64%   | 81.4%       |
+| MPM       | 100%  | 83%    | 100%  | 100%     | 100%     | 64%   | 79.1%       |
+| AMDF      | 100%  | 67%    | 100%  | 100%     | 100%     | 73%   | 74.4%       |
+| HPS       | 40%   | 83%    | 100%  | 50%      | 50%      | 45%   | 55.8%       |
+
+RPA = Raw Pitch Accuracy (within 50 cents of ground truth). Voice failures are octave errors on higher male voice notes (A3+) where the second harmonic dominates the fundamental — a known limitation of classical pitch detectors.
 
 ## Need more accuracy?
 
 **[react-native-pitchy-pro](https://appvision.dev/pitchy-pro)** adds 6 advanced algorithms including ML-powered pitch detection:
 
-| Algorithm | Type | Accuracy | Best For |
-|-----------|------|----------|----------|
-| **CREPE** | ML (CNN) | ~97.8% RPA | Highest accuracy, state-of-the-art |
-| **PESTO** | ML (Lightweight) | ~96.1% RPA | Fast ML, only 29K params |
-| **SwiftF0** | ML (CNN) | ~93% RPA | Noise-robust environments |
-| **pYIN** | HMM + Viterbi | ~92% RPA | Vocal melody extraction |
-| **Salience** | Harmonic Analysis | ~88% RPA | Instrument tuning with tracking |
-| **SWIPE'** | ERB Matching | ~90% RPA | Noise-robust classical |
+| Algorithm | Type | ms/call | Accuracy | Best For |
+|-----------|------|---------|----------|----------|
+| **CREPE** | ML (CNN) | — | ~97.8% RPA* | Highest accuracy, state-of-the-art |
+| **PESTO** | ML (Lightweight) | — | ~96.1% RPA* | Fast ML, only 29K params |
+| **SwiftF0** | ML (CNN) | — | ~93% RPA* | Noise-robust environments |
+| **pYIN** | HMM + Viterbi | 1.27ms | 100% RPA | Vocal melody extraction |
+| **Salience** | Harmonic Analysis | 0.39ms | 100% RPA | Instrument tuning with tracking |
+| **SWIPE'** | ERB Matching | 0.11ms | 100% RPA | Noise-robust classical |
+
+\* ML accuracy from published papers (Kim et al. 2018, Riou et al. 2023). ML latency depends on device and ONNX Runtime.
 
 Pro features:
 - 3 ML models via ONNX Runtime (CREPE, PESTO, SwiftF0)

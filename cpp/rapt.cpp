@@ -5,96 +5,77 @@
 
 namespace pitchy {
 
-// --- Low-pass filter (simple FIR for downsampling) ---
+/**
+ * Compute NCCF at a specific lag.
+ */
+static double nccfAtLag(const double *signal, int N, int lag, int windowSize) {
+    if (lag + windowSize > N || windowSize <= 0 || lag < 0) return 0.0;
 
-static std::vector<double> lowPassFilter(const std::vector<double> &input, int factor) {
-    // Simple averaging FIR filter for anti-aliasing before downsampling
-    int outLen = static_cast<int>(input.size()) / factor;
-    if (outLen <= 0) return {};
+    double crossCorr = 0.0;
+    double energy0 = 0.0;
+    double energyL = 0.0;
 
-    std::vector<double> output(outLen);
-    for (int i = 0; i < outLen; i++) {
-        double sum = 0.0;
-        int start = i * factor;
-        int end = std::min(start + factor, static_cast<int>(input.size()));
-        for (int j = start; j < end; j++) {
-            sum += input[j];
-        }
-        output[i] = sum / (end - start);
+    for (int i = 0; i < windowSize; i++) {
+        crossCorr += signal[i] * signal[i + lag];
+        energy0   += signal[i] * signal[i];
+        energyL   += signal[i + lag] * signal[i + lag];
     }
-    return output;
+
+    double denom = std::sqrt(energy0 * energyL);
+    if (denom < 1e-12) return 0.0;
+    return crossCorr / denom;
 }
 
-// --- Normalized Cross-Correlation Function (NCCF) ---
-
-static std::vector<double> computeNccf(const std::vector<double> &signal,
-                                         int tauMin, int tauMax, int windowSize) {
-    int N = static_cast<int>(signal.size());
-    if (tauMax > N - windowSize) tauMax = N - windowSize;
-    if (tauMin < 0) tauMin = 0;
-
-    int nccfSize = tauMax + 1;
-    std::vector<double> nccf(nccfSize, 0.0);
-
-    // Energy of reference window
-    double refEnergy = 0.0;
-    for (int i = 0; i < windowSize; i++) {
-        refEnergy += signal[i] * signal[i];
+/**
+ * Compute full NCCF array between lagMin and lagMax.
+ */
+static std::vector<double> computeFullNccf(const double *signal, int N,
+                                            int lagMin, int lagMax, int windowSize) {
+    std::vector<double> nccf(lagMax + 1, 0.0);
+    for (int tau = lagMin; tau <= lagMax; tau++) {
+        nccf[tau] = nccfAtLag(signal, N, tau, windowSize);
     }
-
-    for (int tau = tauMin; tau < nccfSize; tau++) {
-        if (tau + windowSize > N) break;
-
-        // Cross-correlation at lag tau
-        double crossCorr = 0.0;
-        double shiftedEnergy = 0.0;
-        for (int i = 0; i < windowSize; i++) {
-            crossCorr += signal[i] * signal[i + tau];
-            shiftedEnergy += signal[i + tau] * signal[i + tau];
-        }
-
-        // Normalized cross-correlation
-        double denom = std::sqrt(refEnergy * shiftedEnergy);
-        if (denom > 1e-10) {
-            nccf[tau] = crossCorr / denom;
-        }
-    }
-
     return nccf;
 }
 
-// --- Peak picking in NCCF ---
+/**
+ * Pick all local maxima in NCCF above threshold.
+ * Returns (lag, nccfValue) pairs sorted by nccfValue descending.
+ */
+struct Candidate { int lag; double nccf; };
 
-struct RaptCandidate {
-    int lag;
-    double nccfValue;
-};
-
-static std::vector<RaptCandidate> pickPeaks(const std::vector<double> &nccf,
-                                             int tauMin, int tauMax,
-                                             double threshold = 0.3) {
-    std::vector<RaptCandidate> candidates;
-    int size = std::min(static_cast<int>(nccf.size()), tauMax + 1);
-
-    for (int tau = tauMin + 1; tau < size - 1; tau++) {
-        // Local maximum check
-        if (nccf[tau] > nccf[tau - 1] && nccf[tau] > nccf[tau + 1] && nccf[tau] > threshold) {
-            candidates.push_back({tau, nccf[tau]});
+static std::vector<Candidate> pickPeaks(const std::vector<double> &nccf,
+                                         int lagMin, int lagMax,
+                                         double threshold = 0.2) {
+    std::vector<Candidate> peaks;
+    for (int tau = lagMin + 1; tau < lagMax; tau++) {
+        if (nccf[tau] > nccf[tau - 1] && nccf[tau] >= nccf[tau + 1] && nccf[tau] > threshold) {
+            peaks.push_back({tau, nccf[tau]});
         }
     }
+    std::sort(peaks.begin(), peaks.end(),
+              [](const Candidate &a, const Candidate &b) { return a.nccf > b.nccf; });
+    return peaks;
+}
 
-    // Sort by NCCF value descending
-    std::sort(candidates.begin(), candidates.end(),
-              [](const RaptCandidate &a, const RaptCandidate &b) {
-                  return a.nccfValue > b.nccfValue;
-              });
+/**
+ * Apply parabolic interpolation around a peak lag to get sub-sample precision.
+ */
+static double parabolicRefine(const std::vector<double> &nccf, int lag,
+                               int lagMin, int lagMax) {
+    if (lag <= lagMin || lag >= lagMax ||
+        lag <= 0 || lag >= static_cast<int>(nccf.size()) - 1)
+        return lag;
 
-    // Keep top 5 candidates
-    if (candidates.size() > 5) {
-        candidates.resize(5);
-    }
+    double x0 = nccf[lag - 1];
+    double x1 = nccf[lag];
+    double x2 = nccf[lag + 1];
+    double a = (x0 + x2 - 2.0 * x1) / 2.0;
+    if (std::abs(a) < 1e-12) return lag;
 
-    return candidates;
+    double delta = -(x2 - x0) / (4.0 * a);
+    if (std::abs(delta) > 1.0) return lag;
+    return lag + delta;
 }
 
 PitchDetectionResult raptDetect(const std::vector<double> &buf,
@@ -105,103 +86,111 @@ PitchDetectionResult raptDetect(const std::vector<double> &buf,
     PitchDetectionResult result = {-1.0, 0.0};
 
     int N = static_cast<int>(buf.size());
-    if (N < 4) return result;
+    if (N < 64) return result;
 
     // Volume check
     double rms = 0;
-    for (int i = 0; i < N; i++) {
-        rms += buf[i] * buf[i];
-    }
+    for (int i = 0; i < N; i++) rms += buf[i] * buf[i];
     rms = std::sqrt(rms / N);
-    double decibel = 20.0 * std::log10(rms + 1e-10);
-    if (decibel < minVolume) return result;
+    if (20.0 * std::log10(rms + 1e-10) < minVolume) return result;
 
-    // =================================================================
-    // Stage 1: Coarse search on downsampled signal
-    // =================================================================
-    const int downsampleFactor = 4;
-    double coarseSampleRate = sampleRate / downsampleFactor;
+    const double *data = buf.data();
 
-    // Lag range for coarse search
-    int coarseTauMin = static_cast<int>(coarseSampleRate / maxFreq);
-    int coarseTauMax = static_cast<int>(coarseSampleRate / minFreq);
-    if (coarseTauMin < 1) coarseTauMin = 1;
+    // Lag bounds: lag = sampleRate / freq
+    int lagMin = std::max(2, static_cast<int>(std::floor(sampleRate / maxFreq)));
+    int lagMax = static_cast<int>(std::ceil(sampleRate / minFreq));
 
-    // Downsample
-    std::vector<double> coarseSignal = lowPassFilter(buf, downsampleFactor);
-    int coarseLen = static_cast<int>(coarseSignal.size());
-    if (coarseLen < coarseTauMax + 1) return result;
+    // Window size — use ~75% of the buffer, leaving room for max lag
+    int windowSize = N - lagMax;
+    if (windowSize < 64) {
+        windowSize = N / 2;
+        lagMax = N - windowSize - 1;
+    }
+    if (lagMin >= lagMax || windowSize < 32) return result;
 
-    // NCCF window size: ~25ms worth of samples at coarse rate
-    int coarseWindowSize = static_cast<int>(0.025 * coarseSampleRate);
-    if (coarseWindowSize > coarseLen / 2) coarseWindowSize = coarseLen / 2;
+    // ═══════════════════════════════════════════════════════
+    // Stage 1: Coarse search on 4× downsampled signal
+    // ═══════════════════════════════════════════════════════
+    const int DS = 4;
+    int coarseN = N / DS;
+    int coarseLagMin = std::max(1, lagMin / DS);
+    int coarseLagMax = lagMax / DS;
 
-    std::vector<double> coarseNccf = computeNccf(coarseSignal, coarseTauMin, coarseTauMax, coarseWindowSize);
-    std::vector<RaptCandidate> coarseCandidates = pickPeaks(coarseNccf, coarseTauMin, coarseTauMax, 0.25);
+    std::vector<double> coarse(coarseN);
+    for (int i = 0; i < coarseN; i++) {
+        double s = 0;
+        for (int j = 0; j < DS; j++) s += buf[i * DS + j];
+        coarse[i] = s / DS;
+    }
 
-    if (coarseCandidates.empty()) return result;
+    int coarseWindow = coarseN - coarseLagMax;
+    if (coarseWindow < 16) coarseWindow = coarseN / 2;
+    if (coarseLagMax > coarseN - coarseWindow) coarseLagMax = coarseN - coarseWindow;
 
-    // =================================================================
-    // Stage 2: Refined search on original signal near coarse candidates
-    // =================================================================
-    int fineWindowSize = static_cast<int>(0.025 * sampleRate);
-    if (fineWindowSize > N / 2) fineWindowSize = N / 2;
+    std::vector<Candidate> coarsePeaks;
+    if (coarseLagMin < coarseLagMax && coarseWindow >= 16) {
+        auto coarseNccf = computeFullNccf(coarse.data(), coarseN,
+                                           coarseLagMin, coarseLagMax, coarseWindow);
+        coarsePeaks = pickPeaks(coarseNccf, coarseLagMin, coarseLagMax, 0.15);
+    }
 
-    double bestPitch = -1.0;
-    double bestConfidence = 0.0;
+    // ═══════════════════════════════════════════════════════
+    // Stage 2: Fine NCCF on original signal
+    // ═══════════════════════════════════════════════════════
+    auto fineNccf = computeFullNccf(data, N, lagMin, lagMax, windowSize);
+    auto finePeaks = pickPeaks(fineNccf, lagMin, lagMax, 0.15);
 
-    for (const auto &coarse : coarseCandidates) {
-        // Convert coarse lag to fine lag range
-        int centerLag = coarse.lag * downsampleFactor;
-        int searchRadius = downsampleFactor * 2; // ±2 coarse samples
+    if (finePeaks.empty()) return result;
 
-        int fineTauMin = std::max(1, centerLag - searchRadius);
-        int fineTauMax = std::min(N - fineWindowSize - 1, centerLag + searchRadius);
-        if (fineTauMin >= fineTauMax) continue;
+    // ═══════════════════════════════════════════════════════
+    // Candidate selection with shortest-lag bias (octave correction)
+    //
+    // RAPT's key insight: among NCCF peaks that are multiples of each
+    // other (subharmonics), prefer the SHORTEST lag (highest frequency)
+    // as long as its NCCF value is reasonably close to the best.
+    // This prevents octave-down errors.
+    // ═══════════════════════════════════════════════════════
 
-        std::vector<double> fineNccf = computeNccf(buf, fineTauMin, fineTauMax, fineWindowSize);
+    double globalBestNccf = finePeaks[0].nccf;
 
-        // Find best lag in fine search
-        int bestFineLag = fineTauMin;
-        double bestFineNccf = -1.0;
-        for (int tau = fineTauMin; tau <= fineTauMax && tau < static_cast<int>(fineNccf.size()); tau++) {
-            if (fineNccf[tau] > bestFineNccf) {
-                bestFineNccf = fineNccf[tau];
-                bestFineLag = tau;
-            }
-        }
+    // Threshold: accept any peak within 85% of the best NCCF
+    double acceptThresh = globalBestNccf * 0.85;
 
-        if (bestFineNccf > bestConfidence) {
-            // Parabolic interpolation for sub-sample precision
-            double refinedLag = bestFineLag;
-            if (bestFineLag > fineTauMin && bestFineLag < fineTauMax &&
-                bestFineLag > 0 && bestFineLag < static_cast<int>(fineNccf.size()) - 1) {
-                double x0 = fineNccf[bestFineLag - 1];
-                double x1 = fineNccf[bestFineLag];
-                double x2 = fineNccf[bestFineLag + 1];
-                double a = (x0 + x2 - 2.0 * x1) / 2.0;
-                if (std::abs(a) > 1e-12) {
-                    double b = (x2 - x0) / 2.0;
-                    double delta = -b / (2.0 * a);
-                    if (std::abs(delta) < 1.0) {
-                        refinedLag = bestFineLag + delta;
-                    }
-                }
-            }
+    // Among acceptable peaks, pick the shortest lag (highest freq)
+    int bestLag = finePeaks[0].lag;
+    double bestNccf = finePeaks[0].nccf;
 
-            if (refinedLag > 0) {
-                double pitch = sampleRate / refinedLag;
-                if (pitch >= minFreq && pitch <= maxFreq) {
-                    bestPitch = pitch;
-                    bestConfidence = bestFineNccf;
-                }
-            }
+    for (const auto &peak : finePeaks) {
+        if (peak.nccf >= acceptThresh && peak.lag < bestLag) {
+            bestLag = peak.lag;
+            bestNccf = peak.nccf;
         }
     }
 
-    if (bestPitch > 0) {
-        result.pitch = bestPitch;
-        result.confidence = std::max(0.0, std::min(1.0, bestConfidence));
+    // Cross-validate with coarse candidates if available
+    // If the coarse stage found a candidate near our fine best, boost confidence
+    bool coarseConfirmed = false;
+    for (const auto &cp : coarsePeaks) {
+        int coarseFine = cp.lag * DS;
+        if (std::abs(coarseFine - bestLag) <= DS * 2) {
+            coarseConfirmed = true;
+            break;
+        }
+    }
+
+    // Parabolic refinement
+    double refinedLag = parabolicRefine(fineNccf, bestLag, lagMin, lagMax);
+    if (refinedLag <= 0) return result;
+
+    double pitch = sampleRate / refinedLag;
+    if (pitch < minFreq || pitch > maxFreq) return result;
+
+    result.pitch = pitch;
+    result.confidence = std::max(0.0, std::min(1.0, bestNccf));
+
+    // Slight confidence boost if coarse confirmed
+    if (coarseConfirmed && result.confidence < 1.0) {
+        result.confidence = std::min(1.0, result.confidence + 0.05);
     }
 
     return result;
