@@ -29,9 +29,12 @@ allprojects {
             url({
                 def searchDir = rootDir.toPath()
                 do {
-                    def p = searchDir.resolve("node_modules/react-native/android")
-                    if (p.toFile().exists()) {
-                        return p.toRealPath().toString()
+                    // RN 0.84+ uses ReactAndroid instead of android
+                    for (def dir : ["ReactAndroid", "android"]) {
+                        def p = searchDir.resolve("node_modules/react-native/${dir}")
+                        if (p.toFile().exists()) {
+                            return p.toRealPath().toString()
+                        }
                     }
                 } while (searchDir = searchDir.getParent())
                 throw new GradleException("Could not find `react-native`");

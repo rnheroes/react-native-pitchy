@@ -25,10 +25,17 @@ class PitchyModuleImpl(private val reactContext: ReactApplicationContext) {
 
   private var minVolume: Double = 0.0
   private var bufferSize: Int = 0
+  private var algorithm: String = "ACF2+"
 
   fun configure(config: ReadableMap) {
     minVolume = config.getDouble("minVolume")
     bufferSize = config.getInt("bufferSize")
+
+    if (config.hasKey("algorithm")) {
+      algorithm = config.getString("algorithm") ?: "ACF2+"
+    }
+
+    nativeConfigurePitchDetector(algorithm, "")
 
     audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
 
@@ -86,14 +93,32 @@ class PitchyModuleImpl(private val reactContext: ReactApplicationContext) {
     audioRecord = null
     recordingThread?.interrupt()
     recordingThread = null
+    nativeReleasePitchDetector()
   }
 
   private external fun nativeAutoCorrelate(buffer: ShortArray, sampleRate: Int, minVolume: Double): Double
+  private external fun nativeConfigurePitchDetector(algorithm: String, modelPath: String)
+  private external fun nativeDetectPitch(buffer: ShortArray, sampleRate: Int, minVolume: Double): Double
+  private external fun nativeDetectPitchWithConfidence(buffer: ShortArray, sampleRate: Int, minVolume: Double): DoubleArray
+  private external fun nativeReleasePitchDetector()
 
   private fun detectPitch(buffer: ShortArray) {
-    val pitch = nativeAutoCorrelate(buffer, sampleRate, minVolume)
+    // Calculate volume (RMS → dB)
+    var rms = 0.0
+    for (sample in buffer) {
+      val normalized = sample.toDouble() / Short.MAX_VALUE
+      rms += normalized * normalized
+    }
+    rms = Math.sqrt(rms / buffer.size)
+    val volume = 20.0 * Math.log10(rms + 1e-10)
+
+    val pitchResult = nativeDetectPitchWithConfidence(buffer, sampleRate, minVolume)
+    val pitch = pitchResult[0]
+    val confidence = pitchResult[1]
     val params: WritableMap = Arguments.createMap()
     params.putDouble("pitch", pitch)
+    params.putDouble("confidence", confidence)
+    params.putDouble("volume", volume)
     reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("onPitchDetected", params)
   }
 

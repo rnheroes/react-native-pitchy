@@ -1,7 +1,7 @@
 {
   "name": "react-native-pitchy",
   "version": "1.2.0",
-  "description": "A simple pitch detection module for React Native",
+  "description": "Real-time pitch detection for React Native with 6 algorithms (ACF2+, YIN, MPM, HPS, AMDF, RAPT)",
   "source": "./src/index.tsx",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -51,7 +51,7 @@
     "type": "git",
     "url": "git+https://github.com/yigithanyucedag/react-native-pitchy.git"
   },
-  "author": "Yiğithan Yücedağ <yigithanyucedag@gmail.com> (https://github.com/yigithanyucedag)",
+  "author": "App Vision",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/yigithanyucedag/react-native-pitchy/issues"

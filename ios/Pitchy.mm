@@ -1,6 +1,7 @@
 #import "Pitchy.h"
 #import <AVFoundation/AVFoundation.h>
 #import <React/RCTLog.h>
+#import "pitch-detector.h"
 
 @implementation Pitchy {
     AVAudioEngine *audioEngine;
@@ -9,9 +10,26 @@
     BOOL isRecording;
     BOOL isInitialized;
     BOOL hasListeners;
+    pitchy::PitchDetector *pitchDetector;
 }
 
 RCT_EXPORT_MODULE()
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        pitchDetector = new pitchy::PitchDetector();
+    }
+    return self;
+}
+
+- (void)dealloc {
+    if (pitchDetector) {
+        pitchDetector->release();
+        delete pitchDetector;
+        pitchDetector = nullptr;
+    }
+}
 
 - (NSArray<NSString *> *)supportedEvents {
   return @[@"onPitchDetected"];
@@ -26,16 +44,23 @@ RCT_EXPORT_MODULE()
 }
 
 RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
-    // Required for RCTEventEmitter
+    [super addListener:eventName];
 }
 
 RCT_EXPORT_METHOD(removeListeners:(double)count) {
-    // Required for RCTEventEmitter
+    [super removeListeners:count];
 }
 
 RCT_EXPORT_METHOD(configure:(NSDictionary *)config) {
     if (!isInitialized) {
         @try {
+            // Set algorithm
+            NSString *algorithm = config[@"algorithm"];
+            if (algorithm) {
+                pitchDetector->setAlgorithm(std::string([algorithm UTF8String]));
+            }
+
+            // Configure audio session
             AVAudioSession *session = [AVAudioSession sharedInstance];
             NSError *error = nil;
             [session setCategory:AVAudioSessionCategoryPlayAndRecord
@@ -116,14 +141,27 @@ RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
 }
 
 - (void)detectPitch:(AVAudioPCMBuffer *)buffer {
+    if (!hasListeners) return;
+
     float *channelData = buffer.floatChannelData[0];
-    std::vector<double> buf(channelData, channelData + buffer.frameLength);
+    UInt32 frameLength = buffer.frameLength;
+    std::vector<double> buf(channelData, channelData + frameLength);
 
-    double detectedPitch = pitchy::autoCorrelate(buf, sampleRate, minVolume);
-
-    if (hasListeners) {
-        [self sendEventWithName:@"onPitchDetected" body:@{@"pitch": @(detectedPitch)}];
+    // Calculate volume (RMS → dB)
+    double rms = 0;
+    for (UInt32 i = 0; i < frameLength; i++) {
+        rms += buf[i] * buf[i];
     }
+    rms = sqrt(rms / frameLength);
+    double volume = 20.0 * log10(rms + 1e-10);
+
+    pitchy::PitchDetectionResult result = pitchDetector->detect(buf, sampleRate, minVolume);
+
+    [self sendEventWithName:@"onPitchDetected" body:@{
+        @"pitch": @(result.pitch),
+        @"confidence": @(result.confidence),
+        @"volume": @(volume)
+    }];
 }
 
 #ifdef RCT_NEW_ARCH_ENABLED

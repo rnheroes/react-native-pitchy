@@ -3,7 +3,7 @@ import NativePitchy from './NativePitchy';
 
 const eventEmitter = new NativeEventEmitter(NativePitchy);
 
-export type PitchyAlgorithm = 'ACF2+';
+export type PitchyAlgorithm = 'ACF2+' | 'YIN' | 'MPM' | 'HPS' | 'AMDF' | 'RAPT';
 
 export type PitchyConfig = {
   /**
@@ -23,7 +23,13 @@ export type PitchyConfig = {
   algorithm?: PitchyAlgorithm;
 };
 
-export type PitchyEventCallback = ({ pitch }: { pitch: number }) => void;
+export type PitchyEvent = {
+  pitch: number;
+  confidence: number;
+  volume: number;
+};
+
+export type PitchyEventCallback = (event: PitchyEvent) => void;
 
 const Pitchy = {
   init(config?: PitchyConfig) {

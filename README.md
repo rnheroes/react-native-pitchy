@@ -1,130 +1,154 @@
 # react-native-pitchy
 
-A real-time pitch detection library for React Native.
+A real-time pitch detection library for React Native with 6 classical algorithms. Cross-platform shared C++ core for iOS and Android.
+
+## Features
+
+- **6 algorithms**: ACF2+, YIN, MPM, HPS, AMDF, RAPT
+- **New Architecture** (TurboModules) and Old Architecture support
+- **Zero dependencies**: No ML frameworks, no ONNX — pure C++ signal processing
+- **YIN-FFT**: O(N log N) classical pitch detection — low latency, sub-cent precision
+- **MPM**: McLeod Pitch Method — bounded NSDF with reliable threshold selection
+- **RAPT**: Two-stage pitch tracking — gold standard for speech processing
+- **Cross-platform**: Shared C++ core for iOS and Android
 
 ## Installation
-
-1. Install the library using a package manager of your choice:
 
 ```sh
 npm install react-native-pitchy
 ```
 
-2. **Linking (iOS only):**
-
 ```sh
 npx pod-install
 ```
 
-3. **Rebuild your app** after installing the package.
-
-> On iOS simulators, pitch detection may not work as expected due to the **lack of microphone support**. Make sure to test on a real device.
+Rebuild your app after installing the package.
 
 ## Permissions
 
-Microphone permissions are **required for pitch detection** to work. Make sure to request the necessary permissions before starting pitch detection. You can use a library like [react-native-permissions](https://github.com/zoontek/react-native-permissions) to request permissions.
+Microphone permissions are required. Use [react-native-permissions](https://github.com/zoontek/react-native-permissions) or similar.
 
-### iOS
-
-`Microphone`
-
-### Android
-
-`RECORD_AUDIO`
+- **iOS**: `Microphone`
+- **Android**: `RECORD_AUDIO`
 
 ## Usage
 
-1. Import the library:
-
 ```tsx
-import Pitchy, { PitchyConfig, PitchyEventCallback } from 'react-native-pitchy';
-```
+import Pitchy from 'react-native-pitchy';
 
-2. **(Optional)** Configure Pitchy before initialization:
-
-```tsx
-const config: PitchyConfig = {
-  bufferSize: 4096, // Adjust buffer size for performance vs accuracy
-  minVolume: -60, // Minimum volume threshold for pitch detection (in dB)
-};
-```
-
-3. Initialize Pitchy with the optional configuration:
-
-```tsx
-Pitchy.init(config);
-```
-
-4. Start pitch detection:
-
-```tsx
-Pitchy.start().then(() => {
-  console.log('Pitch detection started!');
+// Initialize with algorithm choice
+Pitchy.init({
+  algorithm: 'YIN',       // 'ACF2+' | 'YIN' | 'MPM' | 'HPS' | 'AMDF' | 'RAPT'
+  bufferSize: 4096,
+  minVolume: -60,
 });
-```
 
-5. Listen to pitch events:
+// Start detection
+await Pitchy.start();
 
-```tsx
-const handlePitchDetected: PitchyEventCallback = (data) => {
-  console.log('Pitch detected:', data.pitch);
-};
+// Listen to pitch events
+const subscription = Pitchy.addListener(({ pitch, confidence, volume }) => {
+  console.log(`Pitch: ${pitch} Hz, Confidence: ${confidence}, Volume: ${volume} dB`);
+});
 
-const subscription = Pitchy.addListener(handlePitchDetected);
-
-// Remember to unsubscribe later to avoid memory leaks
+// Stop detection
+await Pitchy.stop();
 subscription.remove();
 ```
 
-6. Stop pitch detection:
+## Algorithms
 
-```tsx
-Pitchy.stop().then(() => {
-  console.log('Pitch detection stopped!');
-});
-```
+| Algorithm | Type | Best For | Latency | Accuracy |
+|-----------|------|----------|---------|----------|
+| `ACF2+` | Classical | General purpose | ~4.0ms | Good |
+| `YIN` | Classical (FFT) | Guitar tuning | ~1.3ms | Sub-cent on clean signals |
+| `MPM` | Classical (NSDF) | Instrument tuning | ~1.2ms | Sub-cent (±0.02 cents) |
+| `HPS` | Frequency domain | Harmonic-rich signals | ~0.3ms | Good on strings/brass |
+| `AMDF` | Time domain | Low-power devices | ~1.6ms | ±2 cents on clean signals |
+| `RAPT` | Two-stage NCCF | Speech processing | ~2.0ms | Very robust for speech |
 
-7. Check if pitch detection is running:
+### YIN
+FFT-accelerated autocorrelation with cumulative mean normalized difference. Best for instrument tuning where low latency and high precision on clean signals matter.
 
-```tsx
-Pitchy.isRecording().then((isRecording) => {
-  console.log('Pitch detection is recording:', isRecording);
-});
-```
+### MPM (McLeod Pitch Method)
+Uses the Normalized Squared Difference Function (NSDF) bounded to [-1, 1], making threshold selection reliable. Key-maxima peak picking with parabolic interpolation. Excellent for musical instruments — used in many professional tuner apps.
+
+### HPS (Harmonic Product Spectrum)
+Frequency-domain approach that multiplies downsampled magnitude spectra to amplify the fundamental frequency. Fast and effective for harmonic-rich signals (guitar, bass, brass). Uses Hanning windowing and log-domain parabolic interpolation.
+
+### AMDF (Average Magnitude Difference Function)
+No-multiply pitch detection — uses absolute differences instead of multiplications, making it extremely fast on low-power hardware. Parabolic interpolation for sub-bin precision, with confidence derived from the depth of the AMDF minimum. Best for scenarios where CPU budget is tight.
+
+### RAPT (Robust Algorithm for Pitch Tracking)
+Two-stage pitch detection: first a coarse search on 4x downsampled signal for fast candidate generation, then refined search on the original signal near coarse candidates. Uses Normalized Cross-Correlation Function (NCCF) at both stages. Gold standard for speech processing — robust voiced/unvoiced detection.
+
+## Benchmarks
+
+Measured on Apple Silicon, 4096 samples @ 44.1kHz, 1000 iterations:
+
+| Algorithm | ms/call | FPS | Notes |
+|-----------|---------|-----|-------|
+| HPS | 0.31 | 3228 | Fastest — frequency domain |
+| MPM | 1.24 | 806 | FFT-based NSDF |
+| YIN | 1.26 | 793 | FFT-accelerated CMND |
+| AMDF | 1.60 | 625 | Time-domain, no FFT |
+| RAPT | 2.00 | 500 | Two-stage NCCF |
+| ACF2+ | 4.04 | 248 | Legacy time-domain |
+
+All algorithms run well within real-time requirements (a 4096-sample buffer at 44.1kHz represents ~93ms of audio).
+
+## Need more accuracy?
+
+**[react-native-pitchy-pro](https://appvision.dev/pitchy-pro)** adds 6 advanced algorithms including ML-powered pitch detection:
+
+| Algorithm | Type | Accuracy | Best For |
+|-----------|------|----------|----------|
+| **CREPE** | ML (CNN) | ~97.8% RPA | Highest accuracy, state-of-the-art |
+| **PESTO** | ML (Lightweight) | ~96.1% RPA | Fast ML, only 29K params |
+| **SwiftF0** | ML (CNN) | ~93% RPA | Noise-robust environments |
+| **pYIN** | HMM + Viterbi | ~92% RPA | Vocal melody extraction |
+| **Salience** | Harmonic Analysis | ~88% RPA | Instrument tuning with tracking |
+| **SWIPE'** | ERB Matching | ~90% RPA | Noise-robust classical |
+
+Pro features:
+- 3 ML models via ONNX Runtime (CREPE, PESTO, SwiftF0)
+- pYIN with HMM temporal smoothing for stable vocal tracking
+- Salience with pitch tracking, octave correction, and ERB weighting
+- SWIPE' with sawtooth harmonic template matching
+
+[Learn more](https://appvision.dev/pitchy-pro) | [Contact for licensing](mailto:license@appvision.dev)
 
 ## API
 
 ### Types
 
-- `PitchyAlgorithm`: String representing the pitch detection algorithm (currently only supports `"ACF2+"`)
-- `PitchyConfig`: Configuration object for Pitchy.init
-  - `bufferSize`: (optional) Number representing the audio buffer size (default: 4096)
-  - `minVolume`: (optional) Number representing the minimum volume threshold (default: -60)
-  - `algorithm`: (optional) `PitchyAlgorithm` used for detection (default: "ACF2+")
-- `PitchyEventCallback`: Function called when pitch is detected. Receives an object with a `pitch` property (number)
+- `PitchyAlgorithm`: `'ACF2+' | 'YIN' | 'MPM' | 'HPS' | 'AMDF' | 'RAPT'`
+- `PitchyConfig`:
+  - `bufferSize?`: Audio buffer size (default: 4096)
+  - `minVolume?`: Minimum volume threshold in dB (default: -60)
+  - `algorithm?`: Detection algorithm (default: `'ACF2+'`)
+- `PitchyEvent`:
+  - `pitch`: Detected pitch in Hz (-1 if no pitch)
+  - `confidence`: Detection confidence (0.0 - 1.0)
+  - `volume`: Input volume in dB
+- `PitchyEventCallback`: `(event: PitchyEvent) => void`
 
 ### Methods
 
-- `Pitchy.init(config?: PitchyConfig)`: Initializes Pitchy with an optional configuration.
-- `Pitchy.start()`: Starts pitch detection and returns a Promise.
-- `Pitchy.stop()`: Stops pitch detection and returns a Promise.
-- `Pitchy.isRecording()`: Checks if pitch detection is currently running and returns a Promise resolving to a boolean.
-- `Pitchy.addListener(callback: PitchyEventCallback)`: Adds a listener for the `onPitchDetected` event.
-
-## Roadmap
-
-- [ ] Fix example app (permissions issue related to builder-bob)
-- [ ] Add FFT for ACF2+ algorithm (currently uses a naive implementation)
-- [ ] Add more pitch detection algorithms
+- `Pitchy.init(config?)` — Initialize with optional configuration
+- `Pitchy.start()` — Start pitch detection (Promise)
+- `Pitchy.stop()` — Stop pitch detection (Promise)
+- `Pitchy.isRecording()` — Check if running (Promise\<boolean\>)
+- `Pitchy.addListener(callback)` — Listen to `onPitchDetected` events
 
 ## Examples
 
-Check out the [example app](example) for a simple implementation of pitch detection using Pitchy.
+See the [example app](example) for a working debug implementation with volume metering, raw data display, and algorithm switching.
 
 ## Contributing
 
-See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
+See the [contributing guide](CONTRIBUTING.md).
 
 ## License
 
-MIT
+MIT — Copyright (c) 2024 App Vision
