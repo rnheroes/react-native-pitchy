@@ -116,7 +116,7 @@ RPA = Raw Pitch Accuracy (within 50 cents of ground truth). Voice failures are o
 
 ## Need more accuracy?
 
-**[react-native-pitchy-pro](https://appvision.dev/pitchy-pro)** adds 6 advanced algorithms including ML-powered pitch detection:
+**[react-native-pitchy-pro](https://app-vision.co)** adds 6 advanced algorithms including ML-powered pitch detection:
 
 | Algorithm | Type | ms/call | Accuracy | Best For |
 |-----------|------|---------|----------|----------|
@@ -135,7 +135,7 @@ Pro features:
 - Salience with pitch tracking, octave correction, and ERB weighting
 - SWIPE' with sawtooth harmonic template matching
 
-[Learn more](https://appvision.dev/pitchy-pro) | [Contact for licensing](mailto:license@appvision.dev)
+[Learn more](https://app-vision.co) | [Contact for licensing](mailto:contact@vision-innovations.com)
 
 ## API
 
