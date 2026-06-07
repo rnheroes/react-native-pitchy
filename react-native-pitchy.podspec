@@ -15,6 +15,7 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/yigithanyucedag/react-native-pitchy.git", :tag => "#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,mm}", "cpp/**/*.{hpp,cpp,c,h}"
+  s.exclude_files = "cpp/test_algorithms.cpp" # standalone dev test runner — not for consuming apps
   s.pod_target_xcconfig = { "CLANG_CXX_LANGUAGE_STANDARD" => "c++17" }
 
   # Use install_modules_dependencies helper to install the dependencies if React Native version >=0.71.0.

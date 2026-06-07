@@ -4,33 +4,47 @@
 
 namespace pitchy {
 
-// Reuse FFT from yin-fft — simple radix-2 Cooley-Tukey
-static void mpmFft(std::vector<std::complex<double>> &x) {
-    int N = x.size();
-    if (N <= 1) return;
+// Iterative in-place radix-2 Cooley-Tukey FFT. Much cheaper than a recursive
+// version: no per-level vector allocations, and the twiddle factor advances by a
+// single complex multiply (`w *= wlen`) instead of a std::polar (sin+cos) per
+// butterfly. Run ~86×/sec on a 4096-pt transform, this is what keeps the detector
+// inside its real-time budget even under heavy concurrent audio load — so the
+// input tap can't fall behind and timestamps can't drift late. `inverse` does the
+// IFFT with 1/N scaling. Size must be a power of two (the caller pads to nextPow2).
+static void mpmFftCore(std::vector<std::complex<double>> &a, bool inverse) {
+    int n = static_cast<int>(a.size());
+    if (n <= 1) return;
 
-    std::vector<std::complex<double>> even(N / 2), odd(N / 2);
-    for (int i = 0; i < N / 2; i++) {
-        even[i] = x[2 * i];
-        odd[i] = x[2 * i + 1];
+    // bit-reversal permutation
+    for (int i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) std::swap(a[i], a[j]);
     }
 
-    mpmFft(even);
-    mpmFft(odd);
+    for (int len = 2; len <= n; len <<= 1) {
+        double ang = 2.0 * M_PI / len * (inverse ? 1.0 : -1.0);
+        std::complex<double> wlen(std::cos(ang), std::sin(ang));
+        for (int i = 0; i < n; i += len) {
+            std::complex<double> w(1.0, 0.0);
+            for (int k = 0; k < len / 2; k++) {
+                std::complex<double> u = a[i + k];
+                std::complex<double> v = a[i + k + len / 2] * w;
+                a[i + k] = u + v;
+                a[i + k + len / 2] = u - v;
+                w *= wlen;
+            }
+        }
+    }
 
-    for (int k = 0; k < N / 2; k++) {
-        auto t = std::polar(1.0, -2.0 * M_PI * k / N) * odd[k];
-        x[k] = even[k] + t;
-        x[k + N / 2] = even[k] - t;
+    if (inverse) {
+        for (auto &x : a) x /= static_cast<double>(n);
     }
 }
 
-static void mpmIfft(std::vector<std::complex<double>> &x) {
-    int N = x.size();
-    for (auto &v : x) v = std::conj(v);
-    mpmFft(x);
-    for (auto &v : x) v = std::conj(v) / static_cast<double>(N);
-}
+static void mpmFft(std::vector<std::complex<double>> &x) { mpmFftCore(x, false); }
+static void mpmIfft(std::vector<std::complex<double>> &x) { mpmFftCore(x, true); }
 
 static int nextPow2(int n) {
     int p = 1;
@@ -103,49 +117,39 @@ PitchDetectionResult mpmDetect(const std::vector<double> &buf, double sampleRate
         }
     }
 
-    // Step 3: Find positive key maxima
-    // Skip the first positive region (near-zero lag autocorrelation, not real periodicity)
+    // Step 3: Find the key maxima of the NSDF — each marks a period-multiple
+    // candidate. Mirrors canonical MPM (TarsosDSP / sevagh): skip the initial
+    // positive lobe with a HARD (tauMax-1)/3 bound (so the search can never walk
+    // PAST the true fundamental on a high note), then the sub-zero trough, then
+    // collect local maxima — gating each behind a 0.5 ABSOLUTE floor BEFORE the
+    // relative cutoff. Dropping that 0.5 floor was the bug: low ripples and the
+    // 2×period sub-harmonic stayed eligible, so high notes locked onto the
+    // octave-down peak at confidence ~1.0 (and stray low peaks showed as spikes).
     struct Peak {
         int index;
         double value;
     };
+    constexpr double SMALL_CUTOFF = 0.5; // == TarsosDSP/sevagh MPM_SMALL_CUTOFF
+
+    int startTau = 0;
+    int lobeBound = (tauMax - 1) / 3;
+    while (startTau < lobeBound && nsdf[startTau] > 0.0) startTau++;   // bounded positive-lobe skip
+    while (startTau < tauMax - 1 && nsdf[startTau] <= 0.0) startTau++; // skip the sub-zero trough
+    if (startTau == 0) startTau = 1;
+
     std::vector<Peak> keyMaxima;
-
-    // Find first zero crossing to skip the trivial autocorrelation region
-    int startTau = 1;
-    while (startTau < tauMax && nsdf[startTau] > 0) {
-        startTau++;
-    }
-
-    bool positiveRegion = false;
-    Peak currentMax = {0, -1.0};
-
-    for (int tau = startTau; tau < tauMax; tau++) {
-        if (nsdf[tau] > 0 && !positiveRegion) {
-            positiveRegion = true;
-            currentMax = {tau, nsdf[tau]};
-        } else if (nsdf[tau] > 0 && positiveRegion) {
-            if (nsdf[tau] > currentMax.value) {
-                currentMax = {tau, nsdf[tau]};
-            }
-        } else if (nsdf[tau] <= 0 && positiveRegion) {
-            keyMaxima.push_back(currentMax);
-            positiveRegion = false;
+    double maxPeakValue = -1.0;
+    for (int tau = startTau; tau < tauMax - 1; tau++) {
+        // local maximum (strict left / inclusive right, per the references) that
+        // clears the absolute floor — only these are eligible candidates.
+        if (nsdf[tau] > nsdf[tau - 1] && nsdf[tau] >= nsdf[tau + 1] &&
+            nsdf[tau] > SMALL_CUTOFF) {
+            keyMaxima.push_back({tau, nsdf[tau]});
+            if (nsdf[tau] > maxPeakValue) maxPeakValue = nsdf[tau];
         }
     }
-    if (positiveRegion && currentMax.value > 0) {
-        keyMaxima.push_back(currentMax);
-    }
 
-    if (keyMaxima.empty()) return result;
-
-    // Step 4: Find the highest key maximum
-    double maxPeakValue = -1;
-    for (const auto &peak : keyMaxima) {
-        if (peak.value > maxPeakValue) {
-            maxPeakValue = peak.value;
-        }
-    }
+    if (keyMaxima.empty()) return result; // nothing genuinely periodic → unvoiced
 
     // Step 5: Select the first key maximum above the cutoff threshold
     double thresh = maxPeakValue * cutoff;
