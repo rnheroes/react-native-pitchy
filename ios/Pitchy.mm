@@ -103,6 +103,14 @@ RCT_EXPORT_METHOD(configure:(NSDictionary *)config) {
             AVAudioInputNode *inputNode = [audioEngine inputNode];
 
             AVAudioFormat *format = [inputNode inputFormatForBus:0];
+            // The iOS Simulator (and a real device during a transient route
+            // hand-off) can expose an input node with a zero sample rate or no
+            // channels. installTapOnBus throws for that format. Keep the module
+            // uninitialised so the next attempt can retry after the route settles.
+            if (format.sampleRate <= 0 || format.channelCount == 0) {
+                RCTLogInfo(@"Pitchy input route is not ready yet");
+                return;
+            }
             sampleRate = format.sampleRate;
             minVolume = [config[@"minVolume"] doubleValue];
             minConfidence = config[@"minConfidence"] ? [config[@"minConfidence"] doubleValue] : 0.0;
@@ -127,46 +135,71 @@ RCT_EXPORT_METHOD(configure:(NSDictionary *)config) {
 
             isInitialized = YES;
         } @catch (NSException *exception) {
-            RCTLogError(@"Pitchy configure error: %@ - %@", exception.name, exception.reason);
+            // Configuration failures are recoverable: configure runs again on
+            // the next attempt. Keep this informational so clients can present
+            // their own recovery UI without a React Native developer LogBox.
+            RCTLogInfo(@"Pitchy configure deferred: %@ - %@", exception.name, exception.reason);
         }
     }
 }
 
 RCT_EXPORT_METHOD(isRecording:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject) {
-    resolve([NSNumber numberWithBool:isRecording]);
+    @try {
+        // AVAudioEngine may stop itself after an interruption or route change.
+        // Report observable engine state so JS lifecycle reconciliation never
+        // relies on stale bookkeeping.
+        BOOL engineIsRunning = audioEngine != nil && audioEngine.isRunning;
+        isRecording = engineIsRunning;
+        resolve(@(engineIsRunning));
+    } @catch (NSException *exception) {
+        reject(@"state_error", [NSString stringWithFormat:@"Failed to inspect recording state: %@", exception.reason], nil);
+    }
 }
 
 RCT_EXPORT_METHOD(start:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject) {
-    if (!isInitialized) {
-        reject(@"not_initialized", @"Pitchy module is not initialized", nil);
-        return;
-    }
-
-    if(isRecording){
-        reject(@"already_recording", @"Already recording", nil);
-        return;
-    }
-
-    // Re-anchor the capture clock for THIS recording session. configure() runs only
-    // once (isInitialized guard), so the wall/sample calibration and cumulative sample
-    // counter must be reset on EVERY start(); otherwise a second start() keeps the
-    // first session's calibration, and because the engine is stopped between sessions
-    // (no samples accrue during the gap), every emitted tCaptureMs would be skewed
-    // relative to the new session — a consumer placing samples on a timeline via
-    // tCaptureMs would get them misplaced. The engine is stopped here (isRecording
-    // guard above), so the input tap can't race this reset.
-    totalSamples = 0;
-    calibSample = 0;
-    calibrated = NO;
-    samplesSinceDetect = 0;
-    accumBuffer.clear();
-
     @try {
+        if (!isInitialized || audioEngine == nil) {
+            reject(@"not_initialized", @"Pitchy module is not initialized", nil);
+            return;
+        }
+
+        // AVAudioEngine can stop itself after a route/configuration change. The
+        // engine is the source of truth; never let a stale bookkeeping flag turn
+        // a recoverable restart into already_recording.
+        if (audioEngine.isRunning) {
+            isRecording = YES;
+            resolve(@(YES));
+            return;
+        }
+        isRecording = NO;
+
+        // Re-anchor the capture clock for THIS recording session. configure() runs
+        // only once (isInitialized guard), so calibration and buffered samples must
+        // be reset on EVERY start(). The engine is stopped here, so its input tap
+        // cannot race these mutations.
+        totalSamples = 0;
+        calibSample = 0;
+        calibrated = NO;
+        samplesSinceDetect = 0;
+        accumBuffer.clear();
+
+        // Another audio component may have changed or deactivated the shared
+        // session since configure(). Re-activation is cheap when already active
+        // and makes stop -> start reliable across route hand-offs.
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        NSError *sessionError = nil;
+        BOOL sessionActivated = [session setActive:YES error:&sessionError];
+        if (!sessionActivated || sessionError) {
+            reject(@"audio_session_error", @"Failed to activate audio session", sessionError);
+            return;
+        }
+
+        [audioEngine prepare];
         NSError *error = nil;
-        [audioEngine startAndReturnError:&error];
-        if (error) {
+        BOOL didStart = [audioEngine startAndReturnError:&error];
+        if (!didStart || error) {
             reject(@"start_error", @"Failed to start audio engine", error);
         } else {
             isRecording = YES;
@@ -179,15 +212,19 @@ RCT_EXPORT_METHOD(start:(RCTPromiseResolveBlock)resolve
 
 RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject) {
-
-    if (!isRecording) {
-        reject(@"not_recording", @"Not recording", nil);
-        return;
+    @try {
+        // Cleanup is intentionally idempotent. React lifecycles can issue a
+        // best-effort stop while the next run performs its own cleanup; both
+        // callers must settle successfully instead of racing on isRecording.
+        if (audioEngine != nil && audioEngine.isRunning) {
+            [audioEngine stop];
+        }
+        isRecording = NO;
+        resolve(@(YES));
+    } @catch (NSException *exception) {
+        isRecording = audioEngine != nil && audioEngine.isRunning;
+        reject(@"stop_error", [NSString stringWithFormat:@"Failed to stop: %@", exception.reason], nil);
     }
-
-    [audioEngine stop];
-    isRecording = NO;
-    resolve(@(YES));
 }
 
 - (void)detectPitch:(AVAudioPCMBuffer *)buffer {
